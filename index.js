@@ -12,14 +12,15 @@ app.use(express.urlencoded({ extended: false }))
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
 
+// Session store — har user ki history yaad rahegi
+const sessions = {}
+
 const SYSTEM_PROMPT = `Aap Sehat Saathi hain — ek friendly health dost jo Hindi mein baat karta hai.
 
-Jab bhi koi pehli baar message kare — HAMESHA ye likho:
-
+Pehle message pe HAMESHA ye likho:
 "🙏 Namaskar bhai! Main hoon Sehat Saathi — aapka free health dost!
 
 Apni takleef batao — aur chuno:
-
 1️⃣ 🟢 Normal — Thodi takleef, ghar pe ilaj chahiye
 2️⃣ 🟡 Medium — Zyada takleef, FREE online doctor chahiye
 3️⃣ 🔴 Serious — Bahut zyada takleef, turant madad chahiye"
@@ -30,11 +31,11 @@ Agar 1 chune:
 - 2 din mein theek na ho to 2 option lene bolo
 
 Agar 2 chune:
-- Pehle naam poochho
-- Phir umar poochho
-- Phir mobile number poochho
-- Phir ye bhejo:
-"✅ Details note ho gayi!
+- Pehle sirf naam poochho
+- Jab naam aaye to sirf umar poochho
+- Jab umar aaye to sirf mobile poochho
+- Jab mobile aaye to ye bhejo:
+"✅ [naam] bhai! Details note ho gayi!
 Ab ye karo:
 🔗 esanjeevaniopd.in kholo
 📍 State: Rajasthan
@@ -42,10 +43,11 @@ Ab ye karo:
 Doctor se FREE mein baat karo! 🏥"
 
 Agar 3 chune:
-- Turant likho: "🚨 TURANT 108 call karo! Ek minute mat ruko bhai!"
-- Phir poochho kya hua — local ya Jaipur doctor refer karo
+- Turant likho: "🚨 TURANT 108 call karo bhai!"
+- Phir poochho kya hua
 
-Hamesha Hindi mein, short aur friendly rakho! Emojis use karo!`
+Hamesha conversation yaad rakho — pichli baat ke hisaab se aage badho!
+Hindi mein, short aur friendly rakho! Emojis zaroor use karo!`
 
 // Web chat route
 app.post('/chat', async (req, res) => {
@@ -63,21 +65,40 @@ app.post('/chat', async (req, res) => {
   }
 })
 
-// WhatsApp webhook route
+// WhatsApp webhook route — session ke saath
 app.post('/whatsapp', async (req, res) => {
   try {
     const userMsg = req.body.Body
     const from = req.body.From
 
+    // Session initialize karo agar nahi hai
+    if (!sessions[from]) {
+      sessions[from] = []
+    }
+
+    // User message history mein add karo
+    sessions[from].push({
+      role: 'user',
+      content: userMsg
+    })
+
+    // AI ko poori history bhejo
     const r = await client.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 1000,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMsg }]
+      messages: sessions[from]
     })
 
     const reply = r.content[0].text
 
+    // AI reply bhi history mein save karo
+    sessions[from].push({
+      role: 'assistant',
+      content: reply
+    })
+
+    // WhatsApp pe reply bhejo
     await twilioClient.messages.create({
       from: 'whatsapp:+14155238886',
       to: from,
